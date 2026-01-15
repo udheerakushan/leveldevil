@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nebula Devil</title>
+    <style>
+        body { margin: 0; background: #020105; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; }
+        #ui { position: absolute; width: 100%; top: 20px; color: white; text-align: center; pointer-events: none; }
+        #progress-bg { width: 400px; height: 8px; background: rgba(255,255,255,0.1); margin: 10px auto; border-radius: 4px; overflow: hidden; }
+        #progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #00d4ff, #00ffaa); box-shadow: 0 0 10px #00d4ff; }
+        .stats { font-size: 12px; letter-spacing: 2px; color: #888; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stats">System Status: Exploring Nebula</div>
+        <div id="progress-bg"><div id="progress-fill"></div></div>
+        <div id="distance">0m</div>
+    </div>
+    <canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let w, h;
+
+function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+}
+window.onresize = resize;
+resize();
+
+// --- GAME CONFIG ---
+const PLAYER_SIZE = 26;
+const GRAVITY = 0.55;
+const JUMP = -12.5;
+const MAX_SPEED = 6.5;
+const LEVEL_END_X = 15000; // This makes the level VERY long
+
+let player = {
+    x: 100, y: 300, w: PLAYER_SIZE, h: PLAYER_SIZE,
+    vx: 0, vy: 0, jumps: 0, maxJumps: 3, grounded: false
+};
+
+// --- WORLD GENERATION ---
+let platforms = [];
+let spikes = [];
+let stars = Array.from({length: 200}, () => ({
+    x: Math.random() * w, y: Math.random() * h, size: Math.random() * 2, speed: Math.random() * 0.5
+}));
+
+function generateInfiniteLevel() {
+    platforms = [];
+    spikes = [];
+    let curX = 0;
+    let curY = 500;
+
+    // Start Platform
+    platforms.push({ x: 0, y: 500, w: 400, h: 500, troll: false });
+    curX = 450;
+
+    while (curX < LEVEL_END_X) {
+        let pWidth = 150 + Math.random() * 250;
+        let pGap = 130 + Math.random() * 120;
+        let yShift = (Math.random() - 0.5) * 160;
+        curY = Math.max(250, Math.min(h - 100, curY + yShift));
+
+        let isTroll = Math.random() > 0.7; // 30% are traps
+
+        platforms.push({
+            x: curX, y: curY, w: pWidth, h: 600,
+            troll: isTroll, triggered: false, dy: 0
+        });
+
+        // Add spikes occasionally
+        if (!isTroll && Math.random() > 0.75) {
+            spikes.push({ x: curX + pWidth/2 - 15, y: curY - 25, w: 30, h: 25, active: false, triggerX: curX - 60 });
+        }
+
+        curX += pWidth + pGap;
+    }
+    // Final Door
+    goal = { x: curX, y: curY - 80, w: 50, h: 80 };
+}
+
+let goal = {};
+let camX = 0;
+let keys = {};
+let shake = 0;
+
+window.onkeydown = (e) => {
+    if ((e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') && (player.grounded || player.jumps < player.maxJumps)) {
+        player.vy = JUMP;
+        player.jumps++;
+        player.grounded = false;
+    }
+    keys[e.code] = true;
+};
+window.onkeyup = (e) => keys[e.code] = false;
+
+function reset() {
+    shake = 10;
+    player.x = 100; player.y = 100; player.vx = 0; player.vy = 0;
+    platforms.forEach(p => { p.dy = 0; p.triggered = false; });
+    spikes.forEach(s => s.active = false);
+}
+
+function update() {
+    // Movement
+    if (keys['KeyD'] || keys['ArrowRight']) player.vx += 0.8;
+    else if (keys['KeyA'] || keys['ArrowLeft']) player.vx -= 0.8;
+    else player.vx *= 0.85;
+
+    if (player.vx > MAX_SPEED) player.vx = MAX_SPEED;
+    if (player.vx < -MAX_SPEED) player.vx = -MAX_SPEED;
+
+    player.vy += GRAVITY;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Collisions
+    player.grounded = false;
+    platforms.forEach(p => {
+        let pY = p.y + p.dy;
+        if (player.x > p.x - 100 && p.troll) p.triggered = true;
+        if (p.triggered) p.dy += 1.2;
+
+        if (player.x < p.x + p.w && player.x + player.w > p.x &&
+            player.y + player.h > pY && player.y < pY + 20) {
+            if (player.vy > 0) {
+                player.y = pY - player.h;
+                player.vy = 0;
+                player.grounded = true;
+                player.jumps = 0;
+            }
+        }
+    });
+
+    spikes.forEach(s => {
+        if (player.x > s.triggerX) s.active = true;
+        if (s.active && player.x < s.x + s.w && player.x + player.w > s.x && player.y < s.y + s.h && player.y + player.h > s.y) reset();
+    });
+
+    // Camera & UI
+    camX += (player.x - camX - w/3) * 0.1;
+    let progress = (player.x / goal.x) * 100;
+    document.getElementById('progress-fill').style.width = Math.min(100, progress) + "%";
+    document.getElementById('distance').innerText = Math.floor(player.x / 10) + "m";
+
+    if (player.y > h + 500) reset();
+    if (player.x > goal.x) { alert("MISSION COMPLETE!"); generateInfiniteLevel(); reset(); }
+    if (shake > 0) shake--;
+}
+
+function draw() {
+    // Draw Space
+    let g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0, '#020105'); g.addColorStop(1, '#0f0a1e');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    // Parallax Stars
+    stars.forEach(s => {
+        ctx.fillStyle = "white";
+        let sx = (s.x - camX * s.speed) % w;
+        if (sx < 0) sx += w;
+        ctx.fillRect(sx, s.y, s.size, s.size);
+    });
+
+    ctx.save();
+    if (shake > 0) ctx.translate(Math.random()*shake, Math.random()*shake);
+    ctx.translate(-camX, 0);
+
+    // Goal
+    ctx.shadowBlur = 20; ctx.shadowColor = "#0f0";
+    ctx.strokeStyle = "#0f0"; ctx.lineWidth = 5;
+    ctx.strokeRect(goal.x, goal.y, goal.w, goal.h);
+
+    // Platforms
+    platforms.forEach(p => {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = p.troll ? "#ff0088" : "#00d4ff";
+        ctx.fillStyle = "#0a0a0a";
+        ctx.strokeStyle = ctx.shadowColor;
+        ctx.fillRect(p.x, p.y + p.dy, p.w, p.h);
+        ctx.strokeRect(p.x, p.y + p.dy, p.w, p.h);
+    });
+
+    // Spikes
+    spikes.forEach(s => {
+        if (s.active) {
+            ctx.shadowBlur = 10; ctx.shadowColor = "red";
+            ctx.fillStyle = "#ff3366";
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y + s.h);
+            ctx.lineTo(s.x + s.w/2, s.y);
+            ctx.lineTo(s.x + s.w, s.y + s.h);
+            ctx.fill();
+        }
+    });
+
+    // Player
+    ctx.shadowBlur = 15; ctx.shadowColor = "white";
+    ctx.fillStyle = "white";
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+
+    ctx.restore();
+    update();
+    requestAnimationFrame(draw);
+}
+
+generateInfiniteLevel();
+draw();
+</script>
+</body>
+</html>
